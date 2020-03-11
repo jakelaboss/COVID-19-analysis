@@ -1,9 +1,9 @@
 (unlock-package :sb-ext)
-(ql:quickload '(:inferior-shell :cl-csv :vgplot :inferior-shell))
+(ql:quickload '(:inferior-shell :cl-csv :vgplot :cl-ppcre :inferior-shell))
 
 (defpackage :corona
   (:use :cl :inferior-shell :cl-csv :alexandria
-   :vgplot))
+        :cl-ppcre :vgplot))
 
 (in-package :corona)
 
@@ -89,34 +89,36 @@
                       collect (* z (expt x y))))))
 
 (defun extrapolate (current rate)
-  "this should be our sigmoid function actually"
-  ;; currently we don't know the value of L
-  ;; but the curve should look like
-  (* current (expt 2.718 rate)))
+  "This should be our sigmoid function actually, but currently we don't know the
+value of K, the carrying capacity. For now we're using an expotential growth function,
+but with a rate based on our linear regression."
+  (* current (expt 2.7182818284590452353602874713527d0 rate)))
 
 
   ;; Setup data
+(defun directory-search (x lst)
+  (find-if #'(lambda (y)
+               (scan x y))
+           (mapcar #'namestring lst)))
 
 (defun main ()
   (if (directory "data")
       (run/s "cd data; git pull")
       (run/s "git clone https://github.com/CSSEGISandData/COVID-19 data"))
 
-  ;; we want current active cases. To get that we have to subtract the number of recovered + deaths from the number of conformed cases.
-  ;; We start with confirmed
+
+  ;; We want current active cases. To get that we have to subtract the number of recovered + deaths from the number of conformed cases.
   (let ((cases (directory "data/csse_covid_19_data/csse_covid_19_time_series/*.csv")))
-    (with-open-file (s (print (directory-namestring (find-if #'(lambda (x) (cl-ppcre:scan "Confirmed" x)) cases))))
+    (with-open-file (s (directory-search "Confirmed" cases))
       (map nil #'confirmed-case (cdr (read-csv s))))
 
-  ;; subtract deaths
-    (with-open-file (s (find-if #'(lambda (x) (cl-ppcre:scan "Deaths" x)) cases))
+    (with-open-file (s (directory-search "Deaths" cases))
     (map nil #'inactive-case (cdr (read-csv s))))
 
-  ;; subtract recovered
-    (with-open-file (s (find-if #'(lambda (x) (cl-ppcre:scan "Recovered" x)) cases))
+    (with-open-file (s (directory-search "Recovered" cases))
     (map nil #'inactive-case (cdr (read-csv s)))))
 
-  ;; linear regression of rate of change
+  ;; linear regression of slope of daily active cases
   (daily-cases)
 
   (let ((slope-regression
@@ -126,7 +128,7 @@
       ;; we'll extrapolate out the rate of change using it's linear regression
       (extrapolated-hs (make-hash-table)))
 
-;;  Most recent rate
+;;  Most recent slope
     (let* ((recent-day (apply #'max (hash-table-keys non-chinese-cases)))
            (var (gethash recent-day non-chinese-cases))
            (rate (lastcar (rate(hash-table-values non-chinese-cases)))))
